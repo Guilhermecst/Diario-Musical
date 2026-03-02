@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import spotipy
 import psycopg2
-from datetime import datetime
 from auth import get_access_token
 
 
