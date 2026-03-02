@@ -1,250 +1,229 @@
-# 🎵 Diário Musical  
+# 🎵 Diário Musical
 
-Pipeline de Engenharia de Dados para coleta e armazenamento automático do histórico de reprodução do Spotify.
-
----
-
-## 📌 Sobre o Projeto
-
-O **Diário Musical** é um projeto de Data Engineering que extrai automaticamente os dados de músicas reproduzidas na conta pessoal do Spotify, processa essas informações via Python e armazena em um banco PostgreSQL hospedado no Supabase.
-
-O pipeline roda de forma automatizada através do GitHub Actions, garantindo atualização contínua dos dados sem necessidade de execução manual.
+Projeto de Data Analytics utilizando a API do Spotify para construir um Data Warehouse próprio com dados de consumo musical, armazenado no Supabase (PostgreSQL) e preparado para visualização no Power BI.
 
 ---
 
-## 🏗️ Arquitetura Implementada
+# 📌 Objetivo do Projeto
 
-```
-Spotify Web API
-        ↓
-GitHub Actions (agendamento automático)
-        ↓
-Python ETL
-        ↓
-Supabase (PostgreSQL)
-```
+Criar um pipeline automatizado que:
 
----
+1. Extrai dados do Spotify (músicas ouvidas)
+2. Processa e modela em formato dimensional (Star Schema)
+3. Armazena no Supabase (PostgreSQL)
+4. Permite construção de dashboards no Power BI
 
-## 🧱 Stack Tecnológica
+Foco em:
 
-| Camada | Tecnologia |
-|--------|------------|
-| Linguagem | Python 3.10 |
-| API | Spotify Web API |
-| Banco de Dados | PostgreSQL (Supabase) |
-| Orquestração | GitHub Actions |
-| Driver DB | psycopg2 |
-| Autenticação | OAuth 2.0 (Refresh Token Flow) |
+- Modelagem dimensional correta
+- Boas práticas de ETL
+- Automação via GitHub Actions
+- Arquitetura escalável
 
 ---
 
-## 🔐 Segurança
+# 🏗️ Arquitetura
 
-As credenciais são armazenadas como **GitHub Secrets**, garantindo que nenhuma informação sensível seja versionada.
-
-Secrets utilizados:
-
-- `SPOTIPY_CLIENT_ID`
-- `SPOTIPY_CLIENT_SECRET`
-- `SPOTIPY_REFRESH_TOKEN`
-- `DATABASE_URL`
-
----
-
-## 🔄 Pipeline ETL
-
-### 🔹 Extração
-
-A extração utiliza o endpoint:
-
-```python
-sp.current_user_recently_played()
-```
-
-A coleta é **incremental**, baseada no último `played_at` armazenado no banco:
-
-```sql
-SELECT MAX(played_at) FROM fact_streaming;
-```
-
-Somente novas reproduções são buscadas.
+Spotify API  
+⬇  
+GitHub Actions (ETL automatizado)  
+⬇  
+Supabase (PostgreSQL)  
+⬇  
+Power BI  
 
 ---
 
-### 🔹 Transformação
+# 🔄 ETL Automatizado
 
-Os dados são organizados e estruturados com os seguintes campos:
+O pipeline é executado automaticamente via GitHub Actions.
 
-- `track_id`
-- `track_name`
-- `artist_id`
-- `artist_name`
-- `album_name`
-- `duration_ms`
-- `played_at`
+### Agendamento atual
 
-O campo `played_at` é convertido para timestamp para garantir consistência no banco.
-
----
-
-### 🔹 Carga
-
-A carga é dividida em duas etapas:
-
-#### 1️⃣ UPSERT nas dimensões
-
-##### `dim_artist`
-
-```sql
-PRIMARY KEY (artist_id)
-```
-
-##### `dim_track`
-
-```sql
-PRIMARY KEY (track_id)
-```
-
-Atualização feita via:
-
-```sql
-ON CONFLICT DO UPDATE
-```
-
----
-
-#### 2️⃣ Inserção incremental na fact
-
-Tabela:
-
-### `fact_streaming`
-
-```sql
-PRIMARY KEY (track_id, played_at)
-```
-
-Estratégia:
-
-```sql
-ON CONFLICT (track_id, played_at) DO NOTHING
-```
-
-Isso garante:
-
-- Idempotência
-- Nenhuma duplicação de dados
-- Segurança em reprocessamentos
-
----
-
-## 🗄️ Modelagem de Dados
-
-O projeto utiliza modelo estrela simplificado.
-
-### 🎤 dim_artist
-
-| Campo | Tipo |
-|--------|------|
-| artist_id | TEXT |
-| artist_name | TEXT |
-| created_at | TIMESTAMP |
-
----
-
-### 🎵 dim_track
-
-| Campo | Tipo |
-|--------|------|
-| track_id | TEXT |
-| track_name | TEXT |
-| album_name | TEXT |
-| duration_ms | INTEGER |
-| artist_id | TEXT |
-
----
-
-### 📊 fact_streaming
-
-| Campo | Tipo |
-|--------|------|
-| played_at | TIMESTAMP |
-| track_id | TEXT |
-| artist_id | TEXT |
-| track_name | TEXT |
-| artist_name | TEXT |
-| album_name | TEXT |
-| duration_ms | INTEGER |
-
----
-
-## ⏰ Orquestração
-
-O workflow está configurado para execução automática via GitHub Actions.
-
-Trecho do `spotify_etl.yml`:
+Execução a cada 1 hora:
 
 ```yaml
-on:
-  schedule:
-    - cron: "0 * * * *"  # Executa a cada hora (UTC)
-  workflow_dispatch:
+schedule:
+  - cron: "0 * * * *"
 ```
 
-O pipeline pode ser executado:
+Também pode ser executado manualmente:
 
-- Automaticamente (agendado)
-- Manualmente via interface do GitHub
-
----
-
-## 📂 Estrutura do Repositório
-
-```
-src/
- ├── auth.py
- ├── extract_data.py
-
-.github/
- └── workflows/
-      └── spotify_etl.yml
-
-requirements.txt
-README.md
+```yaml
+workflow_dispatch:
 ```
 
 ---
 
-## 🧠 Conceitos Aplicados
+# 🔐 Autenticação Spotify
 
-- OAuth 2.0 (Refresh Token Flow)
-- ETL incremental
-- UPSERT
-- Idempotência
+Utiliza OAuth com:
+
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
+- `SPOTIFY_REFRESH_TOKEN`
+
+Secrets armazenados no GitHub.
+
+---
+
+# 🗄️ Modelagem de Dados (Star Schema)
+
+## ⭐ fact_streaming
+
+Tabela de eventos (plays).
+
+| Coluna        | Tipo      | Descrição |
+|--------------|----------|-----------|
+| played_at    | TIMESTAMP | Data e hora da execução |
+| track_id     | TEXT | FK para dim_track |
+| artist_id    | TEXT | FK para dim_artist |
+| context_type | TEXT | Origem (playlist, album, etc.) |
+| context_uri  | TEXT | URI do contexto |
+
+---
+
+## 🎼 dim_track
+
+| Coluna        | Tipo |
+|--------------|------|
+| track_id     | TEXT (PK) |
+| track_name   | TEXT |
+| duration_ms  | INTEGER |
+| artist_id    | TEXT (FK) |
+| album_id     | TEXT (FK) |
+| explicit     | BOOLEAN |
+| track_uri    | TEXT |
+
+---
+
+## 🎤 dim_artist
+
+| Coluna       | Tipo |
+|-------------|------|
+| artist_id   | TEXT (PK) |
+| artist_name | TEXT |
+| artist_uri  | TEXT |
+
+---
+
+## 💿 dim_album
+
+| Coluna                   | Tipo |
+|--------------------------|------|
+| album_id                 | TEXT (PK) |
+| album_name               | TEXT |
+| release_date             | TEXT |
+| release_date_precision   | TEXT |
+| total_tracks             | INTEGER |
+| album_type               | TEXT |
+| album_uri                | TEXT |
+| album_image_url_640      | TEXT |
+
+---
+
+# 🔗 Relacionamentos
+
+```
+dim_artist   1 ──── N dim_track
+dim_album    1 ──── N dim_track
+dim_track    1 ──── N fact_streaming
+```
+
+---
+
+# 🧠 Estratégia de Modelagem
+
+- Fact table limpa (somente IDs + evento)
+- Dimensões responsáveis por atributos descritivos
+- Evita duplicação de texto
+- Estrutura preparada para BI profissional
+
+---
+
+# 🧪 Extração Incremental
+
+O ETL:
+
+1. Consulta o maior `played_at` da fact
+2. Busca na API apenas registros posteriores
+3. Faz UPSERT nas dimensões
+4. Insere novos registros na fact
+
+Evita duplicidade via:
+
+```sql
+ON CONFLICT (track_id, played_at) DO NOTHING;
+```
+
+---
+
+# 🚀 Tecnologias Utilizadas
+
+- Python
+- Spotipy
+- PostgreSQL (Supabase)
+- GitHub Actions
+- Power BI
+
+---
+
+# 📁 Estrutura do Projeto
+
+```
+Diario-Musical
+│
+├── .github/workflows
+│   └── spotify_etl.yml
+│
+├── src
+│   ├── auth.py
+│   ├── extract_data.py
+│   ├── get_refresh_token.py
+│   └── explore_vars.py
+│
+├── requirements.txt
+└── README.md
+```
+
+---
+
+# 📊 Próximo Passo
+
+Construção do Dashboard no Power BI utilizando:
+
+- Total Plays
+- Distinct Tracks
+- Distinct Artists
+- Análise por Data
+- Análise por Álbum
+- Análise por Playlist (context_type)
+
+---
+
+# 📌 Status Atual do Projeto
+
+✔ ETL automatizado  
+✔ Modelagem dimensional implementada  
+✔ Supabase configurado  
+✔ Relacionamentos definidos  
+⏳ Desenvolvimento do Dashboard  
+
+---
+
+# 🎯 Visão Final
+
+Projeto de portfólio voltado para:
+
+- Engenharia de Dados
 - Modelagem Dimensional
-- Star Schema
-- Automação em nuvem
-- Gestão de Secrets
-- Conexão segura com PostgreSQL
+- BI
+- Automação
+- Integração com APIs
 
----
+Estrutura preparada para evoluções futuras como:
 
-## 🎯 Objetivo do Projeto
-
-Demonstrar na prática:
-
-- Integração com APIs externas
-- Construção de pipeline automatizado
-- Modelagem analítica
-- Persistência de dados em nuvem
-- Boas práticas de engenharia de dados
-
----
-
-## 🏁 Status Atual
-
-- ✔ Extração incremental implementada  
-- ✔ Banco PostgreSQL estruturado  
-- ✔ Modelagem dimensional aplicada  
-- ✔ GitHub Actions automatizado  
-- ✔ Conexão validada com Supabase  
+- dim_genre
+- dim_playlist
+- dim_date física
+- Métricas avançadas (tempo escutado, tendência, etc.)
