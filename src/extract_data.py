@@ -11,7 +11,14 @@ from auth import get_access_token
 # ===============================
 
 def get_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError("DATABASE_URL não definida.")
+    # garante SSL
+    if "sslmode=" not in dsn:
+        sep = "&" if "?" in dsn else "?"
+        dsn = dsn + f"{sep}sslmode=require"
+    return psycopg2.connect(dsn)
 
 
 # ===============================
