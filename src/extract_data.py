@@ -69,8 +69,7 @@ def fetch_recent_tracks(sp, last_timestamp=None):
                 "track_name": track["name"],
                 "artist_name": track["artists"][0]["name"],
                 "album_name": track["album"]["name"],
-                "duration_ms": track["duration_ms"],
-                "popularity": track["popularity"]
+                "duration_ms": track["duration_ms"]
             })
 
         last_played = items[-1]["played_at"]
