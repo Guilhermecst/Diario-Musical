@@ -13,10 +13,11 @@ def get_connection():
     dsn = os.getenv("DATABASE_URL")
     if not dsn:
         raise RuntimeError("DATABASE_URL não definida.")
-    # garante SSL
+
     if "sslmode=" not in dsn:
         sep = "&" if "?" in dsn else "?"
         dsn = dsn + f"{sep}sslmode=require"
+
     return psycopg2.connect(dsn)
 
 
@@ -25,7 +26,6 @@ def get_connection():
 # ===============================
 
 def get_last_timestamp_from_db():
-
     conn = get_connection()
     cur = conn.cursor()
 
@@ -46,38 +46,49 @@ def get_last_timestamp_from_db():
 # ===============================
 
 def fetch_recent_tracks(sp, last_timestamp=None):
-
     all_tracks = []
     after = last_timestamp
 
     while True:
-
         if after:
-            results = sp.current_user_recently_played(
-                limit=50,
-                after=after
-            )
+            results = sp.current_user_recently_played(limit=50, after=after)
         else:
             results = sp.current_user_recently_played(limit=50)
 
-        items = results["items"]
-
+        items = results.get("items", [])
         if not items:
             break
 
         for item in items:
+            track = item.get("track", {}) or {}
+            album = track.get("album", {}) or {}
+            artists = track.get("artists", []) or []
+            artist = artists[0] if artists else {}
 
-            track = item["track"]
-            artist = track["artists"][0]
+            context = item.get("context")
+            context_type = context.get("type") if isinstance(context, dict) else None
+            context_uri = context.get("uri") if isinstance(context, dict) else None
 
             all_tracks.append({
-                "played_at": item["played_at"],
-                "track_id": track["id"],
-                "track_name": track["name"],
-                "artist_id": artist["id"],
-                "artist_name": artist["name"],
-                "album_name": track["album"]["name"],
-                "duration_ms": track["duration_ms"]
+                "played_at": item.get("played_at"),
+
+                "track_id": track.get("id"),
+                "track_name": track.get("name"),
+                "duration_ms": track.get("duration_ms"),
+                "explicit": track.get("explicit"),
+                "track_uri": track.get("uri"),
+
+                "artist_id": artist.get("id"),
+                "artist_name": artist.get("name"),
+                "artist_uri": artist.get("uri"),
+
+                "album_id": album.get("id"),
+                "album_name": album.get("name"),
+                "release_date": album.get("release_date"),
+                "release_date_precision": album.get("release_date_precision"),
+
+                "context_type": context_type,
+                "context_uri": context_uri,
             })
 
         last_played = items[-1]["played_at"]
@@ -88,43 +99,61 @@ def fetch_recent_tracks(sp, last_timestamp=None):
 
     return pd.DataFrame(all_tracks)
 
+
 # ===============================
-# UPSERT NO BANCO
+# UPSERT DIM ARTIST
 # ===============================
 
 def upsert_dim_artist(conn, df):
-
     sql = """
-        INSERT INTO dim_artist (artist_id, artist_name)
-        VALUES (%s, %s)
+        INSERT INTO dim_artist (artist_id, artist_name, artist_uri)
+        VALUES (%s, %s, %s)
         ON CONFLICT (artist_id)
-        DO UPDATE SET artist_name = EXCLUDED.artist_name;
+        DO UPDATE SET
+            artist_name = EXCLUDED.artist_name,
+            artist_uri  = EXCLUDED.artist_uri;
     """
 
-    rows = df[["artist_id", "artist_name"]].drop_duplicates() \
+    rows = df[["artist_id", "artist_name", "artist_uri"]] \
+        .dropna(subset=["artist_id"]) \
+        .drop_duplicates() \
         .itertuples(index=False, name=None)
 
     cur = conn.cursor()
     cur.executemany(sql, list(rows))
     cur.close()
 
-def upsert_dim_track(conn, df):
 
+# ===============================
+# UPSERT DIM TRACK
+# ===============================
+
+def upsert_dim_track(conn, df):
     sql = """
         INSERT INTO dim_track (
             track_id,
             track_name,
             album_name,
             duration_ms,
-            artist_id
+            artist_id,
+            album_id,
+            release_date,
+            release_date_precision,
+            explicit,
+            track_uri
         )
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (track_id)
         DO UPDATE SET
-            track_name = EXCLUDED.track_name,
-            album_name = EXCLUDED.album_name,
-            duration_ms = EXCLUDED.duration_ms,
-            artist_id = EXCLUDED.artist_id;
+            track_name             = EXCLUDED.track_name,
+            album_name             = EXCLUDED.album_name,
+            duration_ms            = EXCLUDED.duration_ms,
+            artist_id              = EXCLUDED.artist_id,
+            album_id               = EXCLUDED.album_id,
+            release_date           = EXCLUDED.release_date,
+            release_date_precision = EXCLUDED.release_date_precision,
+            explicit               = EXCLUDED.explicit,
+            track_uri              = EXCLUDED.track_uri;
     """
 
     rows = df[[
@@ -132,19 +161,27 @@ def upsert_dim_track(conn, df):
         "track_name",
         "album_name",
         "duration_ms",
-        "artist_id"
-    ]].drop_duplicates().itertuples(index=False, name=None)
+        "artist_id",
+        "album_id",
+        "release_date",
+        "release_date_precision",
+        "explicit",
+        "track_uri"
+    ]] \
+    .dropna(subset=["track_id"]) \
+    .drop_duplicates() \
+    .itertuples(index=False, name=None)
 
     cur = conn.cursor()
     cur.executemany(sql, list(rows))
     cur.close()
 
+
 # ===============================
-# INSERÇÃO NO BANCO
+# INSERÇÃO FACT
 # ===============================
 
 def insert_tracks_into_db(conn, df):
-
     sql = """
         INSERT INTO fact_streaming (
             played_at,
@@ -153,9 +190,15 @@ def insert_tracks_into_db(conn, df):
             artist_name,
             album_name,
             duration_ms,
-            artist_id
+            artist_id,
+            context_type,
+            context_uri,
+            track_uri,
+            artist_uri,
+            album_id,
+            explicit
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (track_id, played_at) DO NOTHING;
     """
 
@@ -166,8 +209,16 @@ def insert_tracks_into_db(conn, df):
         "artist_name",
         "album_name",
         "duration_ms",
-        "artist_id"
-    ]].itertuples(index=False, name=None)
+        "artist_id",
+        "context_type",
+        "context_uri",
+        "track_uri",
+        "artist_uri",
+        "album_id",
+        "explicit"
+    ]] \
+    .dropna(subset=["played_at", "track_id"]) \
+    .itertuples(index=False, name=None)
 
     cur = conn.cursor()
     cur.executemany(sql, list(rows))
@@ -193,23 +244,19 @@ def main():
         print("Nenhuma música nova encontrada.")
         return
 
-    df_new["played_at"] = pd.to_datetime(df_new["played_at"])
+    df_new["played_at"] = pd.to_datetime(df_new["played_at"], errors="coerce")
 
     conn = get_connection()
     try:
-        # 1) sobe dimensões
         upsert_dim_artist(conn, df_new)
         upsert_dim_track(conn, df_new)
-
-        # 2) sobe fato
         insert_tracks_into_db(conn, df_new)
-
-        # 3) persiste tudo
         conn.commit()
     finally:
         conn.close()
 
     print("ETL finalizado com sucesso.")
+
 
 if __name__ == "__main__":
     main()
