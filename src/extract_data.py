@@ -204,3 +204,6 @@ def main():
         conn.close()
 
     print("ETL finalizado com sucesso.")
+
+if __name__ == "__main__":
+    main()
