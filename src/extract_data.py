@@ -1,4 +1,3 @@
-# src/extract_data.py
 import os
 import pandas as pd
 import spotipy
@@ -14,7 +13,6 @@ def get_connection():
     if not dsn:
         raise RuntimeError("DATABASE_URL não definida.")
 
-    # garante SSL
     if "sslmode=" not in dsn:
         sep = "&" if "?" in dsn else "?"
         dsn = dsn + f"{sep}sslmode=require"
@@ -36,6 +34,24 @@ def get_last_timestamp_from_db():
     if result:
         return int(result.timestamp() * 1000)
     return None
+
+
+# ===============================
+# HELPERS
+# ===============================
+def pick_album_images(album: dict):
+    """
+    O Spotify geralmente devolve 3 imagens (640, 300, 64),
+    mas a ordem pode variar. Vamos mapear por width/height.
+    """
+    images = album.get("images") or []
+    by_size = {img.get("width"): img.get("url") for img in images if isinstance(img, dict)}
+
+    return {
+        "album_image_url_640": by_size.get(640),
+        "album_image_url_300": by_size.get(300),
+        "album_image_url_64": by_size.get(64),
+    }
 
 
 # ===============================
@@ -66,6 +82,8 @@ def fetch_recent_tracks(sp, last_timestamp=None):
             context_type = context.get("type") if isinstance(context, dict) else None
             context_uri = context.get("uri") if isinstance(context, dict) else None
 
+            img = pick_album_images(album)
+
             all_rows.append({
                 # evento
                 "played_at": item.get("played_at"),
@@ -91,12 +109,16 @@ def fetch_recent_tracks(sp, last_timestamp=None):
                 "album_type": album.get("album_type"),
                 "album_uri": album.get("uri"),
 
+                # imagens
+                "album_image_url_640": img["album_image_url_640"],
+                "album_image_url_300": img["album_image_url_300"],
+                "album_image_url_64": img["album_image_url_64"],
+
                 # contexto
                 "context_type": context_type,
                 "context_uri": context_uri,
             })
 
-        # paginação: usa played_at do último item retornado
         last_played = items[-1]["played_at"]
         after = int(pd.to_datetime(last_played).timestamp() * 1000)
 
@@ -140,9 +162,12 @@ def upsert_dim_album(conn, df):
             release_date_precision,
             total_tracks,
             album_type,
-            album_uri
+            album_uri,
+            album_image_url_640,
+            album_image_url_300,
+            album_image_url_64
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (album_id)
         DO UPDATE SET
             album_name             = EXCLUDED.album_name,
@@ -150,7 +175,10 @@ def upsert_dim_album(conn, df):
             release_date_precision = EXCLUDED.release_date_precision,
             total_tracks           = EXCLUDED.total_tracks,
             album_type             = EXCLUDED.album_type,
-            album_uri              = EXCLUDED.album_uri;
+            album_uri              = EXCLUDED.album_uri,
+            album_image_url_640    = EXCLUDED.album_image_url_640,
+            album_image_url_300    = EXCLUDED.album_image_url_300,
+            album_image_url_64     = EXCLUDED.album_image_url_64;
     """
 
     rows = (
@@ -162,6 +190,9 @@ def upsert_dim_album(conn, df):
             "total_tracks",
             "album_type",
             "album_uri",
+            "album_image_url_640",
+            "album_image_url_300",
+            "album_image_url_64",
         ]]
         .dropna(subset=["album_id"])
         .drop_duplicates()
@@ -260,13 +291,13 @@ def main():
         print("Nenhuma música nova encontrada.")
         return
 
-    # garante datetime
     df_new["played_at"] = pd.to_datetime(df_new["played_at"], errors="coerce")
 
     conn = get_connection()
     try:
+        # Ordem importa por causa das FKs:
         upsert_dim_artist(conn, df_new)
-        upsert_dim_album(conn, df_new)
+        upsert_dim_album(conn, df_new)   # album antes de track
         upsert_dim_track(conn, df_new)
         insert_fact_streaming(conn, df_new)
 
