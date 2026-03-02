@@ -97,10 +97,9 @@ def insert_tracks_into_db(df):
             track_name,
             artist_name,
             album_name,
-            duration_ms,
-            popularity
+            duration_ms
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (track_id, played_at) DO NOTHING;
     """
 
