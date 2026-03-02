@@ -2,7 +2,7 @@ name: Spotify ETL
 
 on:
   schedule:
-    - cron: "* 1805 * * *" # Diariamente às 18:05 UTC (15:05 horário de Brasília)
+    - cron: "10 18 * * *" # Todos os dias às 18:10 UTC (15:10 horário de Brasília)
   workflow_dispatch:
 
 jobs:
