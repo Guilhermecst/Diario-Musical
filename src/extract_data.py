@@ -1,3 +1,5 @@
+# src/extract_data.py
+
 import os
 import pandas as pd
 import spotipy
@@ -8,8 +10,10 @@ from auth import get_access_token
 # ===============================
 # CONEXÃO COM BANCO
 # ===============================
+
 def get_connection():
     dsn = os.getenv("DATABASE_URL")
+
     if not dsn:
         raise RuntimeError("DATABASE_URL não definida.")
 
@@ -21,57 +25,65 @@ def get_connection():
 
 
 # ===============================
-# BUSCAR ÚLTIMO TIMESTAMP NO BANCO
+# BUSCAR ÚLTIMO TIMESTAMP
 # ===============================
+
 def get_last_timestamp_from_db():
     conn = get_connection()
     cur = conn.cursor()
+
     cur.execute("SELECT MAX(played_at) FROM fact_streaming;")
     result = cur.fetchone()[0]
+
     cur.close()
     conn.close()
 
     if result:
         return int(result.timestamp() * 1000)
+
     return None
 
 
 # ===============================
-# HELPERS
+# HELPER: CAPA 640px
 # ===============================
-def pick_album_images(album: dict):
-    """
-    O Spotify geralmente devolve 3 imagens (640, 300, 64),
-    mas a ordem pode variar. Vamos mapear por width/height.
-    """
-    images = album.get("images") or []
-    by_size = {img.get("width"): img.get("url") for img in images if isinstance(img, dict)}
 
-    return {
-        "album_image_url_640": by_size.get(640),
-        "album_image_url_300": by_size.get(300),
-        "album_image_url_64": by_size.get(64),
-    }
+def pick_album_image_640(album: dict):
+    images = album.get("images") or []
+
+    for img in images:
+        if isinstance(img, dict) and img.get("width") == 640:
+            return img.get("url")
+
+    # fallback: primeira imagem disponível
+    if images and isinstance(images[0], dict):
+        return images[0].get("url")
+
+    return None
 
 
 # ===============================
 # EXTRAÇÃO DA API
 # ===============================
+
 def fetch_recent_tracks(sp, last_timestamp=None):
     all_rows = []
     after = last_timestamp
 
     while True:
+
         if after:
             results = sp.current_user_recently_played(limit=50, after=after)
         else:
             results = sp.current_user_recently_played(limit=50)
 
         items = results.get("items", [])
+
         if not items:
             break
 
         for item in items:
+
             track = item.get("track") or {}
             album = track.get("album") or {}
 
@@ -82,25 +94,25 @@ def fetch_recent_tracks(sp, last_timestamp=None):
             context_type = context.get("type") if isinstance(context, dict) else None
             context_uri = context.get("uri") if isinstance(context, dict) else None
 
-            img = pick_album_images(album)
+            album_image_url_640 = pick_album_image_640(album)
 
             all_rows.append({
-                # evento
+                # Evento
                 "played_at": item.get("played_at"),
 
-                # track
+                # Track
                 "track_id": track.get("id"),
                 "track_name": track.get("name"),
                 "duration_ms": track.get("duration_ms"),
                 "explicit": track.get("explicit"),
                 "track_uri": track.get("uri"),
 
-                # artista principal
+                # Artista
                 "artist_id": artist.get("id"),
                 "artist_name": artist.get("name"),
                 "artist_uri": artist.get("uri"),
 
-                # album
+                # Álbum
                 "album_id": album.get("id"),
                 "album_name": album.get("name"),
                 "release_date": album.get("release_date"),
@@ -108,13 +120,9 @@ def fetch_recent_tracks(sp, last_timestamp=None):
                 "total_tracks": album.get("total_tracks"),
                 "album_type": album.get("album_type"),
                 "album_uri": album.get("uri"),
+                "album_image_url_640": album_image_url_640,
 
-                # imagens
-                "album_image_url_640": img["album_image_url_640"],
-                "album_image_url_300": img["album_image_url_300"],
-                "album_image_url_64": img["album_image_url_64"],
-
-                # contexto
+                # Contexto
                 "context_type": context_type,
                 "context_uri": context_uri,
             })
@@ -131,6 +139,7 @@ def fetch_recent_tracks(sp, last_timestamp=None):
 # ===============================
 # UPSERT DIMENSIONS
 # ===============================
+
 def upsert_dim_artist(conn, df):
     sql = """
         INSERT INTO dim_artist (artist_id, artist_name, artist_uri)
@@ -163,11 +172,9 @@ def upsert_dim_album(conn, df):
             total_tracks,
             album_type,
             album_uri,
-            album_image_url_640,
-            album_image_url_300,
-            album_image_url_64
+            album_image_url_640
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (album_id)
         DO UPDATE SET
             album_name             = EXCLUDED.album_name,
@@ -176,9 +183,7 @@ def upsert_dim_album(conn, df):
             total_tracks           = EXCLUDED.total_tracks,
             album_type             = EXCLUDED.album_type,
             album_uri              = EXCLUDED.album_uri,
-            album_image_url_640    = EXCLUDED.album_image_url_640,
-            album_image_url_300    = EXCLUDED.album_image_url_300,
-            album_image_url_64     = EXCLUDED.album_image_url_64;
+            album_image_url_640    = EXCLUDED.album_image_url_640;
     """
 
     rows = (
@@ -191,8 +196,6 @@ def upsert_dim_album(conn, df):
             "album_type",
             "album_uri",
             "album_image_url_640",
-            "album_image_url_300",
-            "album_image_url_64",
         ]]
         .dropna(subset=["album_id"])
         .drop_duplicates()
@@ -247,8 +250,9 @@ def upsert_dim_track(conn, df):
 
 
 # ===============================
-# INSERT FACT
+# FACT TABLE
 # ===============================
+
 def insert_fact_streaming(conn, df):
     sql = """
         INSERT INTO fact_streaming (
@@ -272,12 +276,13 @@ def insert_fact_streaming(conn, df):
     cur.executemany(sql, list(rows))
     cur.close()
 
-    print(f"{len(df)} plays processados (fact_streaming).")
+    print(f"{len(df)} registros processados na fact_streaming.")
 
 
 # ===============================
 # MAIN
 # ===============================
+
 def main():
     print("Iniciando ETL...")
 
@@ -294,10 +299,11 @@ def main():
     df_new["played_at"] = pd.to_datetime(df_new["played_at"], errors="coerce")
 
     conn = get_connection()
+
     try:
-        # Ordem importa por causa das FKs:
+        # Ordem correta por causa das FKs
         upsert_dim_artist(conn, df_new)
-        upsert_dim_album(conn, df_new)   # album antes de track
+        upsert_dim_album(conn, df_new)
         upsert_dim_track(conn, df_new)
         insert_fact_streaming(conn, df_new)
 
