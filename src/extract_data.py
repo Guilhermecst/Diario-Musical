@@ -62,12 +62,14 @@ def fetch_recent_tracks(sp, last_timestamp=None):
         for item in items:
 
             track = item["track"]
+            artist = track["artists"][0]
 
             all_tracks.append({
                 "played_at": item["played_at"],
                 "track_id": track["id"],
                 "track_name": track["name"],
-                "artist_name": track["artists"][0]["name"],
+                "artist_id": artist["id"],
+                "artist_name": artist["name"],
                 "album_name": track["album"]["name"],
                 "duration_ms": track["duration_ms"]
             })
@@ -80,42 +82,90 @@ def fetch_recent_tracks(sp, last_timestamp=None):
 
     return pd.DataFrame(all_tracks)
 
+# ===============================
+# UPSERT NO BANCO
+# ===============================
+
+def upsert_dim_artist(conn, df):
+
+    sql = """
+        INSERT INTO dim_artist (artist_id, artist_name)
+        VALUES (%s, %s)
+        ON CONFLICT (artist_id)
+        DO UPDATE SET artist_name = EXCLUDED.artist_name;
+    """
+
+    rows = df[["artist_id", "artist_name"]].drop_duplicates() \
+        .itertuples(index=False, name=None)
+
+    cur = conn.cursor()
+    cur.executemany(sql, list(rows))
+    cur.close()
+
+def upsert_dim_track(conn, df):
+
+    sql = """
+        INSERT INTO dim_track (
+            track_id,
+            track_name,
+            album_name,
+            duration_ms,
+            artist_id
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (track_id)
+        DO UPDATE SET
+            track_name = EXCLUDED.track_name,
+            album_name = EXCLUDED.album_name,
+            duration_ms = EXCLUDED.duration_ms,
+            artist_id = EXCLUDED.artist_id;
+    """
+
+    rows = df[[
+        "track_id",
+        "track_name",
+        "album_name",
+        "duration_ms",
+        "artist_id"
+    ]].drop_duplicates().itertuples(index=False, name=None)
+
+    cur = conn.cursor()
+    cur.executemany(sql, list(rows))
+    cur.close()
 
 # ===============================
 # INSERÇÃO NO BANCO
 # ===============================
 
-def insert_tracks_into_db(df):
+def insert_tracks_into_db(conn, df):
 
-    conn = get_connection()
-    cur = conn.cursor()
-
-    insert_query = """
+    sql = """
         INSERT INTO fact_streaming (
             played_at,
             track_id,
             track_name,
             artist_name,
             album_name,
-            duration_ms
+            duration_ms,
+            artist_id
         )
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (track_id, played_at) DO NOTHING;
     """
 
-    for _, row in df.iterrows():
-        cur.execute(insert_query, (
-            row["played_at"],
-            row["track_id"],
-            row["track_name"],
-            row["artist_name"],
-            row["album_name"],
-            row["duration_ms"]
-        ))
+    rows = df[[
+        "played_at",
+        "track_id",
+        "track_name",
+        "artist_name",
+        "album_name",
+        "duration_ms",
+        "artist_id"
+    ]].itertuples(index=False, name=None)
 
-    conn.commit()
+    cur = conn.cursor()
+    cur.executemany(sql, list(rows))
     cur.close()
-    conn.close()
 
     print(f"{len(df)} registros processados.")
 
@@ -125,14 +175,12 @@ def insert_tracks_into_db(df):
 # ===============================
 
 def main():
-
     print("Iniciando ETL...")
 
     access_token = get_access_token()
     sp = spotipy.Spotify(auth=access_token)
 
     last_timestamp = get_last_timestamp_from_db()
-
     df_new = fetch_recent_tracks(sp, last_timestamp)
 
     if df_new.empty:
@@ -141,10 +189,18 @@ def main():
 
     df_new["played_at"] = pd.to_datetime(df_new["played_at"])
 
-    insert_tracks_into_db(df_new)
+    conn = get_connection()
+    try:
+        # 1) sobe dimensões
+        upsert_dim_artist(conn, df_new)
+        upsert_dim_track(conn, df_new)
+
+        # 2) sobe fato
+        insert_tracks_into_db(conn, df_new)
+
+        # 3) persiste tudo
+        conn.commit()
+    finally:
+        conn.close()
 
     print("ETL finalizado com sucesso.")
-
-
-if __name__ == "__main__":
-    main()
