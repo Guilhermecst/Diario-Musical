@@ -2,7 +2,7 @@ name: Spotify ETL
 
 on:
   schedule:
-    - cron: "0 * * * *"  # roda a cada hora
+    - cron: "* 0 * * *" # Executa diariamente à meia-noite
   workflow_dispatch:
 
 jobs:
