@@ -188,26 +188,13 @@ Diario-Musical
 
 ---
 
-# 📊 Próximo Passo
-
-Construção do Dashboard no Power BI utilizando:
-
-- Total Plays
-- Distinct Tracks
-- Distinct Artists
-- Análise por Data
-- Análise por Álbum
-- Análise por Playlist (context_type)
-
----
-
 # 📌 Status Atual do Projeto
 
 ✔ ETL automatizado  
 ✔ Modelagem dimensional implementada  
 ✔ Supabase configurado  
 ✔ Relacionamentos definidos  
-⏳ Desenvolvimento do Dashboard  
+✔ Desenvolvimento do Dashboard  
 
 ---
 
@@ -221,9 +208,4 @@ Projeto de portfólio voltado para:
 - Automação
 - Integração com APIs
 
-Estrutura preparada para evoluções futuras como:
-
-- dim_genre
-- dim_playlist
-- dim_date física
-- Métricas avançadas (tempo escutado, tendência, etc.)
+<img width="1867" height="1049" alt="image" src="https://github.com/user-attachments/assets/6172ba33-adc7-4dda-a36f-bb18077abda9" />
