@@ -11,10 +11,13 @@ def main():
 
     results = sp.current_user_recently_played(limit=1)
 
+    # audio_features = sp.audio_features('00isIFJWVpXIQ8HkGICSQp')
+
     item = results["items"][0]
 
     print(json.dumps(item, indent=2, ensure_ascii=False))
 
+    # print(json.dumps(audio_features, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
     main()

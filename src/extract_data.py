@@ -39,10 +39,9 @@ def get_last_timestamp_from_db():
     conn.close()
 
     if result:
-        return int(result.timestamp() * 1000)
+        return int(result.timestamp() * 1000) # Converte para milissegundos (padrão Spotify)
 
     return None
-
 
 # ===============================
 # HELPER: CAPA 640px
@@ -60,7 +59,6 @@ def pick_album_image_640(album: dict):
         return images[0].get("url")
 
     return None
-
 
 # ===============================
 # EXTRAÇÃO DA API
@@ -133,7 +131,14 @@ def fetch_recent_tracks(sp, last_timestamp=None):
         if len(items) < 50:
             break
 
-    return pd.DataFrame(all_rows)
+    df = pd.DataFrame(all_rows)
+    
+    if not df.empty:
+        df["played_at"] = (pd.to_datetime(df["played_at"])
+                           .dt.tz_convert('America/Sao_Paulo')
+                           .dt.tz_localize(None))
+    
+    return df
 
 
 # ===============================
